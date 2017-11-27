@@ -10,6 +10,7 @@ from cvxopt import matrix, solvers
 
 import gridworld
 import rl
+import sys
 
 def getExpectedFuture(a, s, T_probs, policy, discount, nS):
   forward = T_probs[int(policy[s])][s] - T_probs[a][s]
@@ -49,54 +50,66 @@ def irl_lp(policy, T_probs, discount, R_max, l1):
   T_probs = np.transpose(T_probs, (1, 0, 2))
   A = set(range(nA))
 
-  T_stack = np.vstack([
-    -1 * getExpectedFuture(a, s, T_probs, policy, discount, nS)
+  # The G Matrix has the following shape:
+  #           64               64             64
+  # 192:  [  -futurePayoff,    identity1,     zero1     ]
+  # 192:  [  -futurePayoff,    zero1,         zero1     ]
+  # 64:   [  -identity2,       zero2,       -identity2  ]
+  # 64:   [   identity2,       zero2,       -identity2  ]
+  # 64:   [  -identity2,       zero2,         zero2     ]
+  # 64:   [   identity2,       zero2,         zero2     ]
+
+  # Each row corresponds to the following constraint:
+  # -futurePayoff * R + M <= 0 aka -futurePayoff * R >= M
+  # -futurePayoff * R <= 0 aka futurePayoff * R >= 0
+  # -R - mu <= 0 aka R >= -mu
+  # R - mu <= 0 aka R <= mu
+  # -R <= R_max aka R >= -R_max
+  # R <= R_max
+
+  futurePayoff = np.vstack([
+    getExpectedFuture(a, s, T_probs, policy, discount, nS)
     for s in range(nS)
     for a in A - {int(policy[s])}
   ])
 
-  I_stack1 = np.vstack([
+  # 192 x 64 Identity Matrix
+  identity1 = np.vstack([
     np.eye(1, nS, s)
     for s in range(nS)
     for a in A - {int(policy[s])}
   ])
+  # 64 x 64 Identity Matrix
+  identity2 = np.eye(nS)
 
-  I_stack2 = np.eye(nS)
+  # 192 x 64 Zero Matrix
+  zero1 = np.zeros((nS * (nA - 1), nS))
 
-  zero_stack1 = np.zeros((nS * (nA - 1), nS))
-  zero_stack2 = np.zeros((nS, nS))
+  # 64 x 64 Zero Matrix
+  zero2 = np.zeros((nS, nS))
 
-  D_left = np.vstack([T_stack, T_stack, -I_stack2, I_stack2])
-  D_middle = np.vstack([I_stack1, zero_stack1, zero_stack2, zero_stack2])
-  D_right = np.vstack([zero_stack1, zero_stack1, -I_stack2, -I_stack2])
+  G = np.vstack([
+      np.hstack([ -futurePayoff,  identity1,  zero1       ]), # -futurePayoff * R >= M
+      np.hstack([ -futurePayoff,  zero1,      zero1       ]), # futurePayoff * R >= 0
+      np.hstack([ -identity2,     zero2,      -identity2  ]), # R >= -mu
+      np.hstack([ identity2,      zero2,      -identity2  ]), # R >= -mu
+      np.hstack([ -identity2,     zero2,      zero2       ]), # R >= -R_max
+      np.hstack([ identity2,      zero2,      zero2       ])  # R <= R_max
+    ])
 
-  # c consists of 0 for R
-  # 1 for M
-  # - lambda for mu
-  c = -np.hstack([np.zeros(nS), np.ones(nS), -l1*np.ones(nS)])
+  c = np.hstack([
+      np.zeros(nS),     # Corresponding to R
+      -1 * np.ones(nS), # Corresponding to M
+      l1 * np.ones(nS)  # Corresponding to mu
+    ])
 
-  D = np.hstack([D_left, D_middle, D_right])
 
-  b = np.zeros((nS * (nA - 1) * 2 + 2 * nS, 1))
+  h = np.vstack([
+      np.zeros(((G.shape[0] - 2 * nS), 1)), # the non-R_max part of G
+      R_max * np.ones((nS, 1)),             # R >= -R_max
+      R_max * np.ones((nS, 1))              # R <= R_max
+    ])
 
-  bounds = np.array([(None, None)] * 2 * nS + [(-R_max, R_max)] * nS)
-
-  D_bounds = np.hstack([
-    np.vstack([ -np.eye(nS), np.eye(nS)]),
-    np.vstack([ np.zeros((nS, nS)), np.zeros((nS, nS))]),
-    np.vstack([ np.zeros((nS, nS)), np.zeros((nS, nS))])
-  ])
-
-  b_bounds = np.vstack([R_max * np.ones((nS, 1))]*2)
-
-  D = np.vstack((D, D_bounds))
-  b = np.vstack((b, b_bounds))
-
-  G = matrix(D)
-  h = matrix(b)
-  c = matrix(c)
-
-  results = solvers.lp(c, G, h)
   ## YOUR CODE HERE ##
   # Create c, G and h in the standard form for cvxopt.
   # Look at the documentation of cvxopt.solvers.lp for further details
@@ -104,7 +117,7 @@ def irl_lp(policy, T_probs, discount, R_max, l1):
   # Don't do this all at once. Create portions of the vectors and matrices for
   # different parts of the objective and constraints and concatenate them
   # together using something like np.r_, np.c_, np.vstack and np.hstack.
-  raise NotImplementedError()
+  # raise NotImplementedError()
 
   # You shouldn't need to touch this part.
   c = cvx.matrix(c)
@@ -116,25 +129,42 @@ def irl_lp(policy, T_probs, discount, R_max, l1):
 
   return R
 
+def printGridWorld(title, printArray, width, height, isInt):
+
+  sys.stdout.write("\n\n" + title + "\n\n");
+  for i in range(height):
+    for j in range(width):
+      if (isInt):
+        sys.stdout.write("%6s" % str('%d' % printArray[(i * height) + j]) + " ");
+      else:
+        sys.stdout.write("%6s" % str('%02.2f' % printArray[(i * height) + j]) + " ");
+    sys.stdout.write("\n\n");
+  sys.stdout.flush();
 
 if __name__ == "__main__":
 
-env = gridworld.GridWorld(map_name='8x8')
+  env = gridworld.GridWorld(map_name='8x8')
 
-# Generate policy from Q3.2.1
-gamma = 0.9
-Vs, n_iter = rl.value_iteration(env, gamma)
-policy = rl.policy_from_value_function(env, Vs, gamma)
+  # Generate policy from Q3.2.1
+  gamma = 0.9
+  Vs, n_iter = rl.value_iteration(env, gamma)
+  policy = rl.policy_from_value_function(env, Vs, gamma)
 
-T = env.generateTransitionMatrices()
+  T = env.generateTransitionMatrices()
 
-# Q3.3.5
-# Set R_max and l1 as you want.
-R_max = 1
-l1 = 0.5
-R = irl_lp(policy, T, gamma, R_max, l1)
+  # Q3.3.5
+  # Set R_max and l1 as you want.
+  R_max = 1
+  l1 = 0.5
+  R = irl_lp(policy, T, gamma, R_max, l1)
+
+  printGridWorld("IRL-generated Rewards", R, 8, 8, False)
 
   # You can test out your R by re-running VI with your new rewards as follows:
-  # env_irl = gridworld.GridWorld(map_name='8x8', R=R)
-  # Vs_irl, n_iter_irl = rl.value_iteration(env_irl, gamma)
-  # policy_irl = rl.policy_from_value_function(env_irl, Vs_irl, gamma)
+  env_irl = gridworld.GridWorld(map_name='8x8', R=R)
+  Vs_irl, n_iter_irl = rl.value_iteration(env_irl, gamma)
+  policy_irl = rl.policy_from_value_function(env_irl, Vs_irl, gamma)
+
+  printGridWorld("Values for Value Iteration with IRL-Generated Rewards", Vs_irl, 8, 8, False);
+  printGridWorld("Policy (Actions) for Value Iteration with IRL-Generated Rewards", policy_irl, 8, 8, True);
+  

@@ -105,7 +105,7 @@ def policy_from_value_function(env, value_function, gamma):
         maxValue = currValue
         actionForMaxValue = action
 
-    policy[state] = actionForMaxValue
+    policy[state] = int(actionForMaxValue)
 
   return policy
 
@@ -245,19 +245,19 @@ def policy_improvement(env, value_function, gamma):
     if policy[state] != actionForMaxValue:
       policyStable = False
 
-    policy[state] = actionForMaxValue
+    policy[state] = int(actionForMaxValue)
 
     return (policyStable, policy)
 
 def printGridWorld(title, printArray, width, height, isInt):
 
-  sys.stdout.write(title + "\n\n");
+  sys.stdout.write("\n\n" + title + "\n\n");
   for i in range(height):
     for j in range(width):
       if (isInt):
-        sys.stdout.write(str('%d' % printArray[(i * height) + j]) + " ");
+        sys.stdout.write("%6s" % str('%d' % printArray[(i * height) + j]) + " ");
       else:
-        sys.stdout.write(str('%02.2f' % printArray[(i * height) + j]) + " ");
+        sys.stdout.write("%6s" % str('%02.2f' % printArray[(i * height) + j]) + " ");
     sys.stdout.write("\n\n");
   sys.stdout.flush();
 
